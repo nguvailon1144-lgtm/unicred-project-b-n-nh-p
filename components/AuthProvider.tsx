@@ -210,7 +210,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = async () => {
     try {
-      setLoading(true);
       await supabase.auth.signOut();
       localStorage.clear();
       setUser(null);

@@ -11,6 +11,7 @@ interface ConvRow {
   otherUserId: string;
   otherName: string;
   lastMessage: string;
+  lastMessageTime: string; // ISO string for sorting
   unreadCount: number;
 }
 
@@ -131,10 +132,10 @@ export default function FloatingChat({
         .in('conversation_id', convIds)
         .order('created_at', { ascending: false });
 
-      const lastMsgByConv: Record<string, string> = {};
+      const lastMsgByConv: Record<string, { content: string; time: string }> = {};
       (lastMsgs || []).forEach((m: any) => {
         if (!lastMsgByConv[m.conversation_id]) {
-          lastMsgByConv[m.conversation_id] = m.content;
+          lastMsgByConv[m.conversation_id] = { content: m.content, time: m.created_at };
         }
       });
 
@@ -150,9 +151,18 @@ export default function FloatingChat({
           jobTitle: job?.title || 'Công việc',
           otherUserId,
           otherName: otherUser?.name || otherUser?.email?.split('@')[0] || 'Người dùng',
-          lastMessage: lastMsgByConv[c.id] || '',
+          lastMessage: lastMsgByConv[c.id]?.content || '',
+          lastMessageTime: lastMsgByConv[c.id]?.time || '',
           unreadCount: unreadByConv[c.id] || 0,
         };
+      });
+
+      // Sort: conversations with most recent message first
+      result.sort((a, b) => {
+        if (!a.lastMessageTime && !b.lastMessageTime) return 0;
+        if (!a.lastMessageTime) return 1;
+        if (!b.lastMessageTime) return -1;
+        return new Date(b.lastMessageTime).getTime() - new Date(a.lastMessageTime).getTime();
       });
 
       setConversations(result);
@@ -300,9 +310,20 @@ export default function FloatingChat({
                       )}
                     </div>
                     <p className="text-[10px] text-indigo-500 font-semibold truncate">💼 {conv.jobTitle}</p>
-                    {conv.lastMessage && (
-                      <p className="text-[11px] text-slate-400 truncate mt-0.5">{conv.lastMessage}</p>
-                    )}
+                    <div className="flex items-center justify-between gap-1 mt-0.5">
+                      {conv.lastMessage && (
+                        <p className="text-[11px] text-slate-400 truncate flex-1">{conv.lastMessage}</p>
+                      )}
+                      {conv.lastMessageTime && (
+                        <span className="text-[9px] text-slate-300 font-bold flex-shrink-0">
+                          {new Date(conv.lastMessageTime).toLocaleTimeString('vi-VN', {
+                            timeZone: 'Asia/Ho_Chi_Minh',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
               ))

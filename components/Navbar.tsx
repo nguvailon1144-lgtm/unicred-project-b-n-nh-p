@@ -119,9 +119,8 @@ export default function Navbar() {
     }
   };
 
-  // Compute Gamified Level: Lv. 1 up to Lv. 10
+  // Compute reputation for display
   const reputation = profile?.reputation ?? 100;
-  const userLevel = Math.max(1, Math.min(10, Math.floor(reputation / 100)));
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border-color bg-background/80 backdrop-blur-md">
@@ -160,12 +159,7 @@ export default function Navbar() {
               <div className="hidden sm:flex items-center gap-1.5 rounded-full border border-amber-500/20 bg-amber-500/5 px-3.5 py-1.5 shadow-[0_0_15px_rgba(245,158,11,0.04)]">
                 <span className="text-xs">⭐</span>
                 <span className="text-[10px] text-text-muted font-bold uppercase tracking-wider">Uy tín:</span>
-                <div className="flex items-center gap-1">
-                  <span className="text-xs font-black text-amber-500">{reputation}</span>
-                  <span className="rounded-full bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.2 text-[8px] font-black text-amber-400">
-                    Cấp {userLevel}
-                  </span>
-                </div>
+                <span className="text-xs font-black text-amber-500">{reputation}</span>
               </div>
 
               {/* Credits: staking balance */}
@@ -270,7 +264,7 @@ export default function Navbar() {
                                 <span className={`text-[9px] font-bold block ${
                                   isRead ? 'text-slate-300' : 'text-slate-400'
                                 }`}>
-                                  {new Date(noti.created_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
+                                  {new Date(noti.created_at).toLocaleTimeString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit' })}
                                 </span>
                               </button>
                             );

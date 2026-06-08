@@ -282,23 +282,27 @@ export default function ChatDrawer({
     }
   };
 
-  // Format date and time
+  // Format date and time in Vietnam timezone
   const formatTime = useCallback((isoString: string) => {
     const d = new Date(isoString);
     if (isNaN(d.getTime())) return '';
-    const hours = String(d.getHours()).padStart(2, '0');
-    const minutes = String(d.getMinutes()).padStart(2, '0');
-    return `${hours}:${minutes}`;
+    return d.toLocaleTimeString('vi-VN', {
+      timeZone: 'Asia/Ho_Chi_Minh',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
   }, []);
 
-  // Format seen time
+  // Format seen time in Vietnam timezone
   const formatSeenTime = useCallback((isoString: string | null) => {
     if (!isoString) return '';
     const d = new Date(isoString);
     if (isNaN(d.getTime())) return '';
-    const hours = String(d.getHours()).padStart(2, '0');
-    const minutes = String(d.getMinutes()).padStart(2, '0');
-    return `${hours}:${minutes}`;
+    return d.toLocaleTimeString('vi-VN', {
+      timeZone: 'Asia/Ho_Chi_Minh',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
   }, []);
 
   // Memoized rendered messages
