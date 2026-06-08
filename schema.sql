@@ -857,7 +857,7 @@ BEGIN
     -- Check if rater is the owner of the job (poster rating the claimer)
     IF EXISTS (SELECT 1 FROM jobs WHERE id = NEW.job_id AND owner_id = NEW.rater_id) THEN
       IF NEW.stars <= 2 AND NEW.proof_image_url IS NOT NULL THEN
-        -- Deduct 30 credits from worker (net refund 0)
+        -- Refund 0 credits (reversing the 30 credits completion refund; worker already had 20 credits deducted on job accept)
         UPDATE users SET credits = GREATEST(0, credits - 30) WHERE id = NEW.rated_user_id;
         
         -- Log
@@ -874,7 +874,7 @@ BEGIN
       END IF;
     END IF;
   ELSIF TG_OP = 'DELETE' THEN
-    -- If a low rating (which deducted 30 credits) is removed, return 30 credits
+    -- If a low rating (which refunded 0 credits instead of 30) is removed, refund the 30 credits back to the worker (reinstating their completion refund)
     IF EXISTS (SELECT 1 FROM jobs WHERE id = OLD.job_id AND owner_id = OLD.rater_id) THEN
       IF OLD.stars <= 2 AND OLD.proof_image_url IS NOT NULL THEN
         UPDATE users SET credits = credits + 30 WHERE id = OLD.rated_user_id;
