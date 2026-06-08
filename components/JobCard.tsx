@@ -501,7 +501,7 @@ export default function JobCard({
                       Đã ứng tuyển
                     </button>
                     <button
-                      onClick={() => onOpenChat(job.id, job.owner_id, job.owner?.name || job.owner?.email?.split('@')[0] || 'Nhà tuyển dụng', job.title)}
+                      onClick={() => onOpenChat(job.id, activeUserId, job.owner?.name || job.owner?.email?.split('@')[0] || 'Nhà tuyển dụng', job.title)}
                       className="rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-4 py-2.5 transition-all cursor-pointer flex items-center gap-1 shadow-sm"
                     >
                       💬 Nhắn tin
@@ -573,7 +573,7 @@ export default function JobCard({
                         </div>
                       )}
                       <button
-                        onClick={() => onOpenChat(job.id, job.assigned_worker_id || activeUserId, job.owner?.name || job.owner?.email?.split('@')[0] || 'Nhà tuyển dụng', job.title)}
+                        onClick={() => onOpenChat(job.id, activeUserId, job.owner?.name || job.owner?.email?.split('@')[0] || 'Nhà tuyển dụng', job.title)}
                         className="rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-4 py-2.5 transition-all cursor-pointer flex items-center gap-1 shadow-sm"
                       >
                         💬 Chat
