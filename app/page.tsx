@@ -592,6 +592,71 @@ export default function Dashboard() {
     }
   };
 
+  // Handler: Withdraw application (Freelancer cancels their own application)
+  const handleWithdrawApplication = async (jobId: string) => {
+    try {
+      const { error } = await supabase
+        .from('job_applications')
+        .delete()
+        .eq('job_id', jobId)
+        .eq('user_id', profile!.id);
+
+      if (error) throw error;
+
+      // Also clean up any conversation that was created when applying
+      supabase
+        .from('conversations')
+        .delete()
+        .eq('job_id', jobId)
+        .eq('worker_id', profile!.id)
+        .then(({ error: e }) => {
+          if (e) console.warn('[withdraw] conversation cleanup:', e.message);
+        });
+
+      triggerToast('Đã rút đơn ứng tuyển thành công.', 'info');
+      loadJobsAndRelations(false);
+    } catch (err: any) {
+      console.error(err);
+      triggerToast(err.message || 'Lỗi khi rút đơn ứng tuyển.', 'error');
+    }
+  };
+
+  // Handler: Delete a job posting (Employer deletes their own open job)
+  const handleDeleteJob = async (jobId: string) => {
+    try {
+      // Only allow deleting open jobs (safety check on client side)
+      const job = jobs.find((j) => j.id === jobId);
+      if (!job || job.owner_id !== profile!.id || job.status !== 'open') {
+        throw new Error('Không thể xóa bài đăng này.');
+      }
+
+      const { error } = await supabase
+        .from('jobs')
+        .delete()
+        .eq('id', jobId)
+        .eq('owner_id', profile!.id)
+        .eq('status', 'open');
+
+      if (error) throw error;
+
+      // Refund 20 credits to the poster
+      supabase
+        .from('users')
+        .update({ credits: (profile!.credits ?? 0) + 20 })
+        .eq('id', profile!.id)
+        .then(({ error: e }) => {
+          if (e) console.warn('[deleteJob] credits refund:', e.message);
+        });
+
+      triggerToast('Đã xóa bài đăng thành công. 20 credits đã được hoàn trả.', 'success');
+      loadJobsAndRelations(false);
+      refreshProfile();
+    } catch (err: any) {
+      console.error(err);
+      triggerToast(err.message || 'Lỗi khi xóa bài đăng.', 'error');
+    }
+  };
+
   // Trigger Review Modal
   const handleCompleteClick = (jobId: string, workerId: string) => {
     setSelectedJobId(jobId);
@@ -869,6 +934,7 @@ export default function Dashboard() {
                         }}
                         jobReviews={reputationLogs}
                         userAppeals={userAppeals}
+                        onDeleteJob={handleDeleteJob}
                       />
                     ))}
                   </div>
@@ -961,6 +1027,7 @@ export default function Dashboard() {
                       }}
                       jobReviews={reputationLogs}
                       userAppeals={userAppeals}
+                      onWithdrawApplication={handleWithdrawApplication}
                     />
                   ))}
                 </div>
