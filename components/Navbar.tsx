@@ -25,7 +25,7 @@ export default function Navbar() {
     }
   }, []);
 
-  // Fetch unread notifications
+  // Fetch all notifications (unread + recently read), newest first
   const fetchNotifications = async () => {
     if (!profile) return;
     try {
@@ -33,8 +33,8 @@ export default function Navbar() {
         .from('notifications')
         .select('*')
         .eq('user_id', profile.id)
-        .eq('is_read', false)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .limit(30);
 
       if (error) throw error;
       setNotifications(data || []);
@@ -63,10 +63,10 @@ export default function Navbar() {
           if (payload.eventType === 'INSERT') {
             setNotifications((prev) => [payload.new, ...prev]);
           } else if (payload.eventType === 'UPDATE') {
-            const updatedNoti = payload.new;
-            if (updatedNoti.is_read) {
-              setNotifications((prev) => prev.filter((n) => n.id !== updatedNoti.id));
-            }
+            // Mark as read in-place (keep it visible but greyed)
+            setNotifications((prev) =>
+              prev.map((n) => n.id === payload.new.id ? { ...n, ...payload.new } : n)
+            );
           }
         }
       )
@@ -84,19 +84,23 @@ export default function Navbar() {
     }
   }, []);
 
-  // Handle notification click: mark as read and open chat conversation
+  // Handle notification click: mark as read and optionally redirect
   const handleNotificationClick = async (noti: any) => {
     try {
-      const { error } = await supabase
+      await supabase
         .from('notifications')
         .update({ is_read: true })
         .eq('id', noti.id);
 
-      if (error) throw error;
-      setNotifications((prev) => prev.filter((n) => n.id !== noti.id));
+      setNotifications((prev) =>
+        prev.map((n) => n.id === noti.id ? { ...n, is_read: true } : n)
+      );
 
       if (noti.conversation_id) {
         window.location.href = `/?chat=${noti.conversation_id}`;
+      } else if (noti.job_id) {
+        // Redirect to the page with the job (just reload — user will see it)
+        window.location.href = '/';
       }
     } catch (err) {
       console.error('[Notifications] Lỗi xử lý click thông báo:', err);
@@ -181,9 +185,9 @@ export default function Navbar() {
                   aria-label="Notifications"
                 >
                   🔔
-                  {notifications.length > 0 && (
+                  {notifications.filter((n) => !n.is_read).length > 0 && (
                     <span className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-rose-600 text-[9px] text-white font-black animate-pulse shadow-md">
-                      {notifications.length}
+                      {notifications.filter((n) => !n.is_read).length}
                     </span>
                   )}
                 </button>
@@ -193,43 +197,84 @@ export default function Navbar() {
                   <>
                     <div className="fixed inset-0 z-10" onClick={() => setNotiDropdownOpen(false)} />
                     <div className="absolute right-0 mt-2.5 w-80 z-20 rounded-2xl border border-border-color bg-white dark:bg-slate-900 p-2 shadow-2xl animate-fade-in max-h-96 overflow-y-auto">
-                      <div className="px-3.5 py-2.5 border-b border-slate-200 dark:border-slate-800">
+                      <div className="px-3.5 py-2.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
                         <span className="block text-xs font-black text-slate-900 dark:text-slate-100">
-                          Thông báo mới ({notifications.length})
+                          Thông báo ({notifications.filter((n) => !n.is_read).length} mới)
                         </span>
+                        {notifications.some((n) => !n.is_read) && (
+                          <button
+                            onClick={async () => {
+                              await supabase.from('notifications').update({ is_read: true }).eq('user_id', profile.id).eq('is_read', false);
+                              setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
+                            }}
+                            className="text-[9px] text-indigo-500 font-bold hover:underline cursor-pointer"
+                          >
+                            Đọc tất cả
+                          </button>
+                        )}
                       </div>
                       
                       {notifications.length === 0 ? (
                         <div className="py-8 px-4 text-center text-xs text-text-muted italic">
-                          Không có thông báo mới nào
+                          Không có thông báo nào
                         </div>
                       ) : (
-                        notifications.map((noti) => {
-                          const hasChat = noti.conversation_id && (noti.type === 'job_applied' || noti.type === 'job_confirmed' || noti.type === 'message');
-                          const icon = noti.type === 'job_applied' ? '📩' : noti.type === 'job_confirmed' ? '✅' : '🔔';
-                          return (
-                            <button
-                              key={noti.id}
-                              onClick={() => {
-                                setNotiDropdownOpen(false);
-                                handleNotificationClick(noti);
-                              }}
-                              className="w-full flex flex-col items-start gap-1 rounded-xl px-3 py-2.5 text-xs text-left hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors mt-1 border border-transparent cursor-pointer"
-                            >
-                              <span className="font-bold text-slate-850 dark:text-slate-100 block w-full">
-                                {icon} {noti.content}
-                              </span>
-                              {hasChat && (
-                                <span className="text-[10px] text-indigo-500 font-bold flex items-center gap-1">
-                                  💬 Bấm vào đây để trò chuyện
+                        // Sort: unread first, then read
+                        [...notifications]
+                          .sort((a, b) => {
+                            if (a.is_read !== b.is_read) return a.is_read ? 1 : -1;
+                            return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+                          })
+                          .map((noti) => {
+                            const isRead = noti.is_read;
+                            const hasConvLink = noti.conversation_id && ['job_applied', 'job_confirmed', 'job_completed_pending', 'message'].includes(noti.type);
+                            const hasConfirmLink = noti.type === 'job_completed_pending';
+                            const icon = noti.type === 'job_applied' ? '📩'
+                              : noti.type === 'job_confirmed' ? '✅'
+                              : noti.type === 'job_completed_pending' ? '🏁'
+                              : noti.type === 'job_done_confirmed' ? '🎉'
+                              : '🔔';
+                            return (
+                              <button
+                                key={noti.id}
+                                onClick={() => {
+                                  setNotiDropdownOpen(false);
+                                  handleNotificationClick(noti);
+                                }}
+                                className={`w-full flex flex-col items-start gap-1 rounded-xl px-3 py-2.5 text-xs text-left transition-colors mt-1 border cursor-pointer ${
+                                  isRead
+                                    ? 'border-transparent hover:bg-slate-50 opacity-60'
+                                    : 'border-indigo-500/10 bg-indigo-500/5 hover:bg-indigo-500/10'
+                                }`}
+                              >
+                                <span className={`font-bold block w-full ${
+                                  isRead ? 'text-slate-400' : 'text-slate-850 dark:text-slate-100'
+                                }`}>
+                                  {icon} {noti.content}
                                 </span>
-                              )}
-                              <span className="text-[9px] text-slate-400 font-bold block">
-                                {new Date(noti.created_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
-                              </span>
-                            </button>
-                          );
-                        })
+                                {hasConfirmLink && (
+                                  <span className="text-[10px] text-emerald-600 font-bold flex items-center gap-1">
+                                    ✔️ Bấm vào đây để xác nhận
+                                  </span>
+                                )}
+                                {hasConvLink && !hasConfirmLink && (
+                                  <span className="text-[10px] text-indigo-500 font-bold flex items-center gap-1">
+                                    💬 Bấm vào đây để trò chuyện
+                                  </span>
+                                )}
+                                {noti.type === 'job_done_confirmed' && (
+                                  <span className="text-[10px] text-amber-500 font-bold">
+                                    Chúc bạn một ngày mới tốt lành! 🌟
+                                  </span>
+                                )}
+                                <span className={`text-[9px] font-bold block ${
+                                  isRead ? 'text-slate-300' : 'text-slate-400'
+                                }`}>
+                                  {new Date(noti.created_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                              </button>
+                            );
+                          })
                       )}
                     </div>
                   </>

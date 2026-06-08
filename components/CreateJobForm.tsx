@@ -170,9 +170,9 @@ export default function CreateJobForm({
 
   return (
     <div className="relative rounded-2xl border border-border-color bg-card-bg p-6 shadow-md">
-      <h2 className="text-xl font-bold text-foreground mb-1">Đăng việc mới</h2>
+      <h2 className="text-xl font-bold text-foreground mb-1">Đăng công việc mới</h2>
       <p className="text-xs text-text-muted mb-6">
-        Thuê sinh viên làm freelancer. Ngân sách sẽ được hệ thống tạm giữ an toàn cho đến khi duyệt sản phẩm.
+        Thuê sinh viên làm freelancer. 20 credits sẽ được trừ cho mỗi công việc được đăng và sẽ được hoàn trả sau khi công việc được hoàn thành..
       </p>
 
       {/* Info/Error Banners */}
@@ -230,7 +230,7 @@ export default function CreateJobForm({
           {/* Price */}
           <div>
             <label htmlFor="price" className="block text-xs font-bold uppercase tracking-wider text-text-muted mb-1.5">
-              Ngân sách (VNĐ)
+              Tiền công (VNĐ)
             </label>
             <div className="relative">
               <input
@@ -261,6 +261,11 @@ export default function CreateJobForm({
               disabled={isSubmitting}
               className="w-full form-input rounded-xl px-4 py-3 text-sm color-scheme-dark"
             />
+            {deadline && (
+              <p className="text-[10px] text-text-muted mt-1">
+                → {deadline.split('-').reverse().join('/')}
+              </p>
+            )}
           </div>
         </div>
 
@@ -305,10 +310,10 @@ export default function CreateJobForm({
           {isSubmitting ? (
             <>
               <div className="h-4 w-4 animate-spin rounded-full border border-t-transparent border-white" />
-              Đang đăng tuyển & tạm khóa quỹ...
+              Đang đăng tuyển...
             </>
           ) : (
-            `Đăng việc làm (Ngân sách: ${price ? Number(price).toLocaleString('vi-VN') : '0'}đ)`
+            `Đăng việc làm (Tiền công: ${price ? Number(price).toLocaleString('vi-VN') : '0'}đ)`
           )}
         </button>
       </form>

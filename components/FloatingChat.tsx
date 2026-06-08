@@ -3,14 +3,23 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
-interface Conversation {
+interface ConvRow {
   id: string;
   job_id: string;
   worker_id: string;
-  job?: { title: string; owner_id: string };
-  other_user?: { id: string; name: string | null; email: string };
-  last_message?: string;
-  unread_count?: number;
+  jobTitle: string;
+  otherUserId: string;
+  otherName: string;
+  lastMessage: string;
+  unreadCount: number;
+}
+
+interface ProfileInfo {
+  name: string;
+  email: string;
+  university?: string;
+  reputation?: number;
+  credits?: number;
 }
 
 interface FloatingChatProps {
@@ -25,143 +34,160 @@ export default function FloatingChat({
   onOpenConversation,
 }: FloatingChatProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [conversations, setConversations] = useState<ConvRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [totalUnread, setTotalUnread] = useState(0);
+  const [profileModal, setProfileModal] = useState<ProfileInfo | null>(null);
 
-  // Profile modal state
-  const [profileModal, setProfileModal] = useState<{
-    name: string;
-    email: string;
-    university?: string;
-    reputation?: number;
-    credits?: number;
-  } | null>(null);
-
+  // Simplified: single query using two separate fetches then merge
   const loadConversations = useCallback(async () => {
     if (!activeUserId) return;
     setLoading(true);
     try {
-      // Fetch all conversations where current user is either owner (via job) or worker
-      const { data: convData, error } = await supabase
+      // Step 1: fetch conversations where user is the worker
+      const { data: asWorker } = await supabase
         .from('conversations')
-        .select('id, job_id, worker_id, job:job_id(title, owner_id)')
-        .or(`worker_id.eq.${activeUserId}`)
+        .select('id, job_id, worker_id')
+        .eq('worker_id', activeUserId)
         .order('id', { ascending: false })
-        .limit(30);
+        .limit(20);
 
-      if (error) throw error;
-
-      const rawConvs: any[] = convData || [];
-
-      // Also fetch conversations where we're the job owner
-      const { data: ownerConvData } = await supabase
-        .from('conversations')
-        .select('id, job_id, worker_id, job:job_id(title, owner_id)')
-        .filter('job_id', 'in', `(${rawConvs.length > 0 ? 'null' : 'null'})`) // placeholder
-        .limit(0);
-      
-      // Get all job IDs owned by current user to find owner-side convs
+      // Step 2: fetch conversations where user owns the job
       const { data: myJobs } = await supabase
         .from('jobs')
-        .select('id')
-        .eq('owner_id', activeUserId);
+        .select('id, owner_id')
+        .eq('owner_id', activeUserId)
+        .limit(50);
 
-      let ownerConvs: any[] = [];
+      let asOwner: any[] = [];
       if (myJobs && myJobs.length > 0) {
         const jobIds = myJobs.map((j: any) => j.id);
         const { data: oc } = await supabase
           .from('conversations')
-          .select('id, job_id, worker_id, job:job_id(title, owner_id)')
+          .select('id, job_id, worker_id')
           .in('job_id', jobIds)
           .order('id', { ascending: false })
-          .limit(30);
-        ownerConvs = oc || [];
+          .limit(20);
+        asOwner = oc || [];
       }
 
       // Merge and deduplicate
-      const allConvs: any[] = [];
       const seen = new Set<string>();
-      [...rawConvs, ...ownerConvs].forEach((c) => {
+      const allConvIds: { id: string; job_id: string; worker_id: string; isWorker: boolean }[] = [];
+      for (const c of [...(asWorker || []), ...asOwner]) {
         if (!seen.has(c.id)) {
           seen.add(c.id);
-          allConvs.push(c);
+          allConvIds.push({ ...c, isWorker: c.worker_id === activeUserId });
+        }
+      }
+
+      if (allConvIds.length === 0) {
+        setConversations([]);
+        setLoading(false);
+        return;
+      }
+
+      // Step 3: batch fetch all job titles
+      const uniqueJobIds = [...new Set(allConvIds.map((c) => c.job_id))];
+      const { data: jobsData } = await supabase
+        .from('jobs')
+        .select('id, title, owner_id')
+        .in('id', uniqueJobIds);
+      const jobMap: Record<string, { title: string; owner_id: string }> = {};
+      (jobsData || []).forEach((j: any) => { jobMap[j.id] = j; });
+
+      // Step 4: batch fetch all other party user profiles
+      const otherUserIds = allConvIds.map((c) => {
+        const job = jobMap[c.job_id];
+        return c.isWorker ? (job?.owner_id || null) : c.worker_id;
+      }).filter(Boolean) as string[];
+
+      const uniqueOtherIds = [...new Set(otherUserIds)];
+      const { data: usersData } = await supabase
+        .from('users')
+        .select('id, name, email')
+        .in('id', uniqueOtherIds);
+      const userMap: Record<string, { name: string | null; email: string }> = {};
+      (usersData || []).forEach((u: any) => { userMap[u.id] = u; });
+
+      // Step 5: batch fetch unread counts via single query
+      const convIds = allConvIds.map((c) => c.id);
+      const { data: unreadMsgs } = await supabase
+        .from('messages')
+        .select('id, conversation_id')
+        .in('conversation_id', convIds)
+        .neq('sender_id', activeUserId)
+        .eq('seen', false);
+
+      const unreadByConv: Record<string, number> = {};
+      (unreadMsgs || []).forEach((m: any) => {
+        unreadByConv[m.conversation_id] = (unreadByConv[m.conversation_id] || 0) + 1;
+      });
+
+      // Step 6: batch fetch last messages
+      const { data: lastMsgs } = await supabase
+        .from('messages')
+        .select('conversation_id, content, created_at')
+        .in('conversation_id', convIds)
+        .order('created_at', { ascending: false });
+
+      const lastMsgByConv: Record<string, string> = {};
+      (lastMsgs || []).forEach((m: any) => {
+        if (!lastMsgByConv[m.conversation_id]) {
+          lastMsgByConv[m.conversation_id] = m.content;
         }
       });
 
-      // For each conversation, fetch the other party's info
-      const enriched = await Promise.all(
-        allConvs.map(async (conv) => {
-          const job = Array.isArray(conv.job) ? conv.job[0] : conv.job;
-          const isWorker = conv.worker_id === activeUserId;
-          const otherUserId = isWorker ? (job?.owner_id || null) : conv.worker_id;
+      // Assemble
+      const result: ConvRow[] = allConvIds.map((c) => {
+        const job = jobMap[c.job_id];
+        const otherUserId = c.isWorker ? (job?.owner_id || '') : c.worker_id;
+        const otherUser = userMap[otherUserId];
+        return {
+          id: c.id,
+          job_id: c.job_id,
+          worker_id: c.worker_id,
+          jobTitle: job?.title || 'Công việc',
+          otherUserId,
+          otherName: otherUser?.name || otherUser?.email?.split('@')[0] || 'Người dùng',
+          lastMessage: lastMsgByConv[c.id] || '',
+          unreadCount: unreadByConv[c.id] || 0,
+        };
+      });
 
-          let other_user = { id: otherUserId || '', name: null as string | null, email: 'Người dùng' };
-          if (otherUserId) {
-            const { data: ud } = await supabase
-              .from('users')
-              .select('id, name, email')
-              .eq('id', otherUserId)
-              .single();
-            if (ud) other_user = ud as any;
-          }
-
-          // Fetch unread count
-          const { count } = await supabase
-            .from('messages')
-            .select('id', { count: 'exact', head: true })
-            .eq('conversation_id', conv.id)
-            .neq('sender_id', activeUserId)
-            .eq('seen', false);
-
-          // Fetch last message
-          const { data: lastMsgData } = await supabase
-            .from('messages')
-            .select('content')
-            .eq('conversation_id', conv.id)
-            .order('created_at', { ascending: false })
-            .limit(1);
-
-          return {
-            ...conv,
-            job: Array.isArray(conv.job) ? conv.job[0] : conv.job,
-            other_user,
-            unread_count: count || 0,
-            last_message: lastMsgData?.[0]?.content || null,
-          } as Conversation;
-        })
-      );
-
-      setConversations(enriched);
-      setTotalUnread(enriched.reduce((sum, c) => sum + (c.unread_count || 0), 0));
+      setConversations(result);
+      setTotalUnread(result.reduce((s, c) => s + c.unreadCount, 0));
     } catch (err) {
-      console.error('[FloatingChat] Error loading conversations:', err);
+      console.error('[FloatingChat] Error:', err);
     } finally {
       setLoading(false);
     }
   }, [activeUserId]);
 
   useEffect(() => {
-    if (isOpen) {
-      loadConversations();
-    }
+    if (isOpen) loadConversations();
   }, [isOpen, loadConversations]);
 
-  // Poll for unread count even when closed
+  // Lightweight unread poll when panel is closed
   useEffect(() => {
     if (!activeUserId) return;
-    const interval = setInterval(async () => {
-      const { count } = await supabase
-        .from('messages')
-        .select('id', { count: 'exact', head: true })
-        .neq('sender_id', activeUserId)
-        .eq('seen', false);
-      setTotalUnread(count || 0);
-    }, 15000);
+    const poll = async () => {
+      try {
+        const { count } = await supabase
+          .from('messages')
+          .select('id', { count: 'exact', head: true })
+          .neq('sender_id', activeUserId)
+          .eq('seen', false);
+        setTotalUnread(count || 0);
+      } catch {}
+    };
+    poll();
+    const interval = setInterval(poll, 20000);
     return () => clearInterval(interval);
   }, [activeUserId]);
 
   const handleOpenProfile = async (userId: string) => {
+    if (!userId) return;
     try {
       const { data } = await supabase
         .from('users')
@@ -178,15 +204,8 @@ export default function FloatingChat({
         });
       }
     } catch (err) {
-      console.error('[FloatingChat] Error loading profile:', err);
+      console.error('[FloatingChat] Profile error:', err);
     }
-  };
-
-  const handleOpenConv = (conv: Conversation) => {
-    const jobTitle = (conv.job as any)?.title || 'Công việc';
-    const otherName = conv.other_user?.name || conv.other_user?.email?.split('@')[0] || 'Người dùng';
-    setIsOpen(false);
-    onOpenConversation(conv.id, jobTitle, otherName);
   };
 
   return (
@@ -233,78 +252,66 @@ export default function FloatingChat({
           {/* Header */}
           <div className="px-4 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 flex items-center justify-between">
             <span className="text-sm font-black text-white">💬 Tin nhắn</span>
-            <button
-              onClick={() => setIsOpen(false)}
-              className="text-white/70 hover:text-white text-lg leading-none cursor-pointer"
-            >
-              ✕
-            </button>
+            <button onClick={() => setIsOpen(false)} className="text-white/70 hover:text-white text-lg leading-none cursor-pointer">✕</button>
           </div>
 
-          {/* Conversation List */}
+          {/* List */}
           <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
             {loading ? (
-              <div className="p-6 flex justify-center">
+              <div className="p-8 flex flex-col items-center gap-2">
                 <div className="h-6 w-6 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" />
+                <span className="text-xs text-slate-400">Đang tải...</span>
               </div>
             ) : conversations.length === 0 ? (
               <div className="p-6 text-center text-xs text-slate-400">
                 <p className="text-2xl mb-2">💬</p>
                 <p>Chưa có cuộc trò chuyện nào.</p>
-                <p className="mt-1">Nhắn tin với ứng viên qua các bài đăng công việc.</p>
+                <p className="mt-1 text-[11px]">Nhắn tin với ứng viên qua các bài đăng.</p>
               </div>
             ) : (
-              conversations.map((conv) => {
-                const otherName = conv.other_user?.name || conv.other_user?.email?.split('@')[0] || 'Người dùng';
-                const jobTitle = (conv.job as any)?.title || 'Công việc';
-                return (
-                  <div
-                    key={conv.id}
-                    className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50 cursor-pointer transition-colors"
-                    onClick={() => handleOpenConv(conv)}
+              conversations.map((conv) => (
+                <div
+                  key={conv.id}
+                  className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50 cursor-pointer transition-colors"
+                  onClick={() => {
+                    setIsOpen(false);
+                    onOpenConversation(conv.id, conv.jobTitle, conv.otherName);
+                  }}
+                >
+                  <button
+                    className="h-10 w-10 min-w-[40px] rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center text-white font-black text-sm flex-shrink-0 hover:scale-105 transition-transform cursor-pointer"
+                    onClick={(e) => { e.stopPropagation(); handleOpenProfile(conv.otherUserId); }}
+                    title="Xem hồ sơ"
                   >
-                    {/* Avatar / clickable for profile */}
-                    <button
-                      className="h-10 w-10 min-w-10 rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center text-white font-black text-sm flex-shrink-0 hover:scale-105 transition-transform cursor-pointer"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (conv.other_user?.id) handleOpenProfile(conv.other_user.id);
-                      }}
-                      title="Xem hồ sơ"
-                    >
-                      {otherName[0]?.toUpperCase() || 'U'}
-                    </button>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-1">
-                        <button
-                          className="text-xs font-black text-slate-900 truncate hover:text-indigo-600 transition-colors cursor-pointer"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (conv.other_user?.id) handleOpenProfile(conv.other_user.id);
-                          }}
-                        >
-                          {otherName}
-                        </button>
-                        {(conv.unread_count || 0) > 0 && (
-                          <span className="flex-shrink-0 h-5 min-w-5 rounded-full bg-indigo-600 text-white text-[10px] font-black flex items-center justify-center px-1">
-                            {conv.unread_count}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-[10px] text-indigo-500 font-semibold truncate">💼 {jobTitle}</p>
-                      {conv.last_message && (
-                        <p className="text-[11px] text-slate-400 truncate mt-0.5">{conv.last_message}</p>
+                    {(conv.otherName[0] || 'U').toUpperCase()}
+                  </button>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-1">
+                      <button
+                        className="text-xs font-black text-slate-900 truncate hover:text-indigo-600 transition-colors cursor-pointer"
+                        onClick={(e) => { e.stopPropagation(); handleOpenProfile(conv.otherUserId); }}
+                      >
+                        {conv.otherName}
+                      </button>
+                      {conv.unreadCount > 0 && (
+                        <span className="flex-shrink-0 h-5 min-w-[20px] rounded-full bg-indigo-600 text-white text-[10px] font-black flex items-center justify-center px-1">
+                          {conv.unreadCount}
+                        </span>
                       )}
                     </div>
+                    <p className="text-[10px] text-indigo-500 font-semibold truncate">💼 {conv.jobTitle}</p>
+                    {conv.lastMessage && (
+                      <p className="text-[11px] text-slate-400 truncate mt-0.5">{conv.lastMessage}</p>
+                    )}
                   </div>
-                );
-              })
+                </div>
+              ))
             )}
           </div>
         </div>
       )}
 
-      {/* Floating Bubble Button */}
+      {/* Bubble Button */}
       <button
         onClick={() => setIsOpen((v) => !v)}
         className="fixed bottom-6 right-6 z-[60] h-14 w-14 rounded-full bg-gradient-to-br from-indigo-600 to-purple-600 text-white shadow-2xl flex items-center justify-center hover:scale-110 active:scale-95 transition-all duration-200 cursor-pointer border-2 border-white"
@@ -312,7 +319,7 @@ export default function FloatingChat({
       >
         <span className="text-2xl">{isOpen ? '✕' : '💬'}</span>
         {totalUnread > 0 && !isOpen && (
-          <span className="absolute -top-1 -right-1 h-5 min-w-5 rounded-full bg-rose-500 border-2 border-white text-white text-[10px] font-black flex items-center justify-center px-1">
+          <span className="absolute -top-1 -right-1 h-5 min-w-[20px] rounded-full bg-rose-500 border-2 border-white text-white text-[10px] font-black flex items-center justify-center px-1">
             {totalUnread > 9 ? '9+' : totalUnread}
           </span>
         )}

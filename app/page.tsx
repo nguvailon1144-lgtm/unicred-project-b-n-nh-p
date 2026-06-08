@@ -489,22 +489,102 @@ export default function Dashboard() {
   // Handler: Approve Completion from either Client or Worker
   const handleApproveCompletion = async (jobId: string, role: 'client' | 'worker') => {
     try {
-      const updateData: any = {};
-      if (role === 'client') {
-        updateData.client_approved = true;
+      const job = jobs.find((j) => j.id === jobId);
+      const jobTitle = job?.title || 'Công việc';
+      const workerId = job?.assigned_worker_id || '';
+      const ownerId = job?.owner_id || '';
+
+      if (role === 'worker') {
+        // Worker reports job as done
+        const { error } = await supabase
+          .from('jobs')
+          .update({ worker_approved: true })
+          .eq('id', jobId);
+        if (error) throw error;
+
+        // Notify the job poster: 'has been completed, click to confirm'
+        supabase
+          .from('conversations')
+          .select('id')
+          .eq('job_id', jobId)
+          .eq('worker_id', profile!.id)
+          .limit(1)
+          .then(async ({ data: convs }) => {
+            const convId = convs?.[0]?.id || null;
+            supabase.from('notifications').insert([{
+              user_id: ownerId,
+              conversation_id: convId,
+              type: 'job_completed_pending',
+              content: `${jobTitle} đã được hoàn thành`,
+              job_id: jobId,
+            }]).then(() => {});
+          });
+
+        triggerToast('Báo cáo hoàn thành thành công! Đang chờ nhà tuyển dụng xác nhận.', 'success');
+
       } else {
-        updateData.worker_approved = true;
+        // Client approves: check if worker already reported done
+        const currentJob = jobs.find((j) => j.id === jobId);
+
+        const { error } = await supabase
+          .from('jobs')
+          .update({ client_approved: true })
+          .eq('id', jobId);
+        if (error) throw error;
+
+        // If worker already approved, mark as completed and return credits
+        if (currentJob?.worker_approved) {
+          const { error: completeErr } = await supabase
+            .from('jobs')
+            .update({ status: 'completed' })
+            .eq('id', jobId);
+          if (completeErr) console.warn('[complete status]', completeErr.message);
+
+          // Return 20 staking credits + 10 bonus to both parties (frontend backup in case trigger fails)
+          if (ownerId) {
+            supabase.from('users')
+              .update({ credits: (profile!.credits ?? 0) + 30 })
+              .eq('id', ownerId)
+              .then(({ error: e }) => { if (e) console.warn('[credits owner refund]', e.message); });
+          }
+          if (workerId) {
+            supabase.from('users')
+              .select('credits')
+              .eq('id', workerId)
+              .single()
+              .then(async ({ data: wd }) => {
+                if (wd) {
+                  await supabase.from('users')
+                    .update({ credits: (wd.credits ?? 0) + 30 })
+                    .eq('id', workerId);
+                }
+              });
+          }
+
+          // Notify the worker: job confirmed done
+          supabase.from('conversations')
+            .select('id')
+            .eq('job_id', jobId)
+            .eq('worker_id', workerId)
+            .limit(1)
+            .then(async ({ data: convs }) => {
+              const convId = convs?.[0]?.id || null;
+              supabase.from('notifications').insert([{
+                user_id: workerId,
+                conversation_id: convId,
+                type: 'job_done_confirmed',
+                content: `${jobTitle} đã hoàn thành`,
+                job_id: jobId,
+              }]).then(() => {});
+            });
+
+          triggerToast('Đã xác nhận hoàn thành! Credits đã được hoàn trả và cộng thưởng.', 'success');
+        } else {
+          triggerToast('Đã duyệt! Đang chờ freelancer báo cáo hoàn thành.', 'success');
+        }
       }
 
-      const { error } = await supabase
-        .from('jobs')
-        .update(updateData)
-        .eq('id', jobId);
-
-      if (error) throw error;
-
-      triggerToast('Đã xác nhận hoàn thành công việc của bạn!', 'success');
-      loadJobsAndRelations();
+      loadJobsAndRelations(false);
       refreshProfile();
     } catch (err: any) {
       console.error('Lỗi khi xác nhận hoàn thành:', err);

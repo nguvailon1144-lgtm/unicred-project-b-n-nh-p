@@ -258,7 +258,7 @@ export default function JobCard({
               )}
             </span>
             <span className="text-[10px] text-text-muted font-medium block mt-0.5">
-              ⭐ Uy tín Client: {ownerRep}/100
+              ⭐ Uy tín: {ownerRep}/100
             </span>
           </div>
           <div>
@@ -267,9 +267,6 @@ export default function JobCard({
             </span>
             <span className="font-semibold text-rose-500 flex items-center gap-1">
               📅 {formatVietnameseDate(job.deadline)}
-            </span>
-            <span className="text-[10px] text-text-muted font-medium block mt-0.5">
-              Ngân sách: <span className="text-emerald-600 font-bold">{job.price.toLocaleString('vi-VN')}đ</span>
             </span>
           </div>
         </div>
@@ -361,7 +358,17 @@ export default function JobCard({
                     <span className="block text-[9px] text-text-muted mt-0.5">⭐ Uy tín: {workerRep}/100</span>
                   </div>
                   <button
-                    onClick={() => onOpenChat(job.id, contract?.worker_id || '', contract?.worker?.name || contract?.worker?.email || 'Sinh Viên', job.title)}
+                    onClick={() => {
+                      const wId = contract?.worker_id || job.assigned_worker_id || '';
+                      // Try to get name from contract, then from applications list
+                      const appMatch = applications.find((a) => a.user_id === wId);
+                      const wName = contract?.worker?.name
+                        || contract?.worker?.email?.split('@')[0]
+                        || appMatch?.user?.name
+                        || appMatch?.user?.email?.split('@')[0]
+                        || 'Người nhận việc';
+                      onOpenChat(job.id, wId, wName, job.title);
+                    }}
                     className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1 shadow-sm"
                   >
                     💬 Nhắn tin
@@ -468,7 +475,7 @@ export default function JobCard({
             {/* 4. Job is cancelled */}
             {job.status === 'cancelled' && (
               <div className="flex items-center gap-2 text-xs font-bold text-rose-600 dark:text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-xl p-3.5 justify-center">
-                Công việc đã bị hủy. Cọc 30 credits đã bị tịch thu.
+                Công việc đã bị hủy bỏ.
               </div>
             )}
           </div>
@@ -494,7 +501,7 @@ export default function JobCard({
                       Đã ứng tuyển
                     </button>
                     <button
-                      onClick={() => onOpenChat(job.id, activeUserId, job.owner?.name || job.owner?.email || 'Nhà tuyển dụng', job.title)}
+                      onClick={() => onOpenChat(job.id, job.owner_id, job.owner?.name || job.owner?.email?.split('@')[0] || 'Nhà tuyển dụng', job.title)}
                       className="rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-4 py-2.5 transition-all cursor-pointer flex items-center gap-1 shadow-sm"
                     >
                       💬 Nhắn tin
@@ -566,7 +573,7 @@ export default function JobCard({
                         </div>
                       )}
                       <button
-                        onClick={() => onOpenChat(job.id, activeUserId, job.owner?.name || job.owner?.email || 'Nhà tuyển dụng', job.title)}
+                        onClick={() => onOpenChat(job.id, job.assigned_worker_id || activeUserId, job.owner?.name || job.owner?.email?.split('@')[0] || 'Nhà tuyển dụng', job.title)}
                         className="rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-4 py-2.5 transition-all cursor-pointer flex items-center gap-1 shadow-sm"
                       >
                         💬 Chat

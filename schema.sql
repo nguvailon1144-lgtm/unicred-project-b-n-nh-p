@@ -797,3 +797,6 @@ END $$;
 
 -- Enable Realtime on notifications table
 ALTER PUBLICATION supabase_realtime ADD TABLE notifications;
+
+-- Step 6: Ensure notifications table has job_id column (for job completion redirect)
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS job_id UUID REFERENCES jobs(id) ON DELETE SET NULL;
