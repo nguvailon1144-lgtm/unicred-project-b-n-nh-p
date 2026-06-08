@@ -176,19 +176,29 @@ export default function JobCard({
       {/* Top Details */}
       <div>
         <div className="flex items-center justify-between gap-4 mb-3">
-          {/* Status Badge */}
-          {job.status === 'open' && (
+          {/* Status Badge — contextual based on view and user role */}
+          {job.status === 'open' && activeView === 'earn' && applied ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-indigo-500/20 bg-indigo-500/10 px-2.5 py-0.5 text-xs font-semibold text-indigo-600 dark:text-indigo-400">
+              <span className="h-1.5 w-1.5 rounded-full bg-indigo-500" />
+              Đã ứng tuyển
+            </span>
+          ) : job.status === 'open' ? (
             <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-0.5 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
               Đang tuyển
             </span>
-          )}
-          {job.status === 'in_progress' && (
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/20 bg-amber-500/10 px-2.5 py-0.5 text-xs font-semibold text-amber-600 dark:text-amber-400">
-              <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
-              Đang làm việc
+          ) : null}
+          {job.status === 'in_progress' && activeView === 'earn' && job.assigned_worker_id === activeUserId ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-0.5 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              Đã nhận
             </span>
-          )}
+          ) : job.status === 'in_progress' ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-rose-500/20 bg-rose-500/10 px-2.5 py-0.5 text-xs font-semibold text-rose-600 dark:text-rose-400">
+              <span className="h-1.5 w-1.5 rounded-full bg-rose-500 animate-pulse" />
+              Đang hết
+            </span>
+          ) : null}
           {job.status === 'completed' && (
             <span className="inline-flex items-center gap-1.5 rounded-full border border-purple-500/20 bg-purple-500/10 px-2.5 py-0.5 text-xs font-semibold text-purple-600 dark:text-purple-400">
               <span className="h-1.5 w-1.5 rounded-full bg-purple-500" />
@@ -304,7 +314,7 @@ export default function JobCard({
                               🏫 {app.user?.university || 'Trường Đại học'}
                             </span>
                             <span className="inline-flex items-center gap-1 text-[10px] text-amber-500 font-bold mt-0.5">
-                              ⭐ Freelancer Rep: {appRep}
+                              ⭐ Uy tín: {appRep}
                             </span>
                           </div>
                           
@@ -324,7 +334,7 @@ export default function JobCard({
                               {loadingAction === `accept-${app.user_id}` ? (
                                 <div className="h-3 w-3 animate-spin rounded-full border border-t-transparent border-white" />
                               ) : (
-                                'Chọn nhận'
+                                'Xác nhận'
                               )}
                             </button>
                           </div>

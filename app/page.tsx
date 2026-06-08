@@ -9,6 +9,7 @@ import JobCard, { Job, Application, Contract } from '@/components/JobCard';
 import ReviewModal from '@/components/ReviewModal';
 import AppealModal from '@/components/AppealModal';
 import ChatDrawer from '@/components/ChatDrawer';
+import FloatingChat from '@/components/FloatingChat';
 
 interface ToastState {
   message: string;
@@ -38,6 +39,7 @@ export default function Dashboard() {
   // View context & Filters
   const [activeView, setActiveView] = useState<'hire' | 'earn'>('earn');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [showAppliedOnly, setShowAppliedOnly] = useState(false);
   
   // Custom Toast State
   const [toast, setToast] = useState<ToastState | null>(null);
@@ -386,6 +388,37 @@ export default function Dashboard() {
       if (error) throw error;
 
       triggerToast('Ứng tuyển thành công! Vui lòng đợi nhà tuyển dụng phản hồi.', 'success');
+
+      // Find the job owner to notify them
+      const job = jobs.find((j) => j.id === jobId);
+      if (job) {
+        // Find or create conversation so notification can link to chat
+        supabase
+          .from('conversations')
+          .select('id')
+          .eq('job_id', jobId)
+          .eq('worker_id', profile!.id)
+          .limit(1)
+          .then(async ({ data: convs }) => {
+            let convId: string | null = convs?.[0]?.id || null;
+            if (!convId) {
+              const { data: newConv } = await supabase
+                .from('conversations')
+                .insert([{ job_id: jobId, worker_id: profile!.id }])
+                .select('id')
+                .single();
+              convId = newConv?.id || null;
+            }
+            // Notify the job owner
+            supabase.from('notifications').insert([{
+              user_id: job.owner_id,
+              conversation_id: convId,
+              type: 'job_applied',
+              content: `${job.title} Đã có người ứng tuyển`,
+            }]).then(() => {});
+          });
+      }
+
       loadJobsAndRelations(false); // silent — no skeleton flash
     } catch (err: any) {
       console.error(err);
@@ -396,7 +429,7 @@ export default function Dashboard() {
   // Handler: Hires a candidate (Employer Action)
   const handleAcceptApplicant = async (jobId: string, workerId: string) => {
     try {
-      // 1. Update Job state to in_progress and assign the worker
+      // 1. Update Job state to in_progress — this is the critical write, must succeed
       const { error: jobError } = await supabase
         .from('jobs')
         .update({ 
@@ -407,15 +440,45 @@ export default function Dashboard() {
 
       if (jobError) throw jobError;
 
-      // 2. Insert new Contract (For backward compatibility / tracking)
-      const { error: contractError } = await supabase
+      // 2. Insert Contract non-blocking (avoids RLS hang on contracts table)
+      supabase
         .from('contracts')
-        .insert([{ job_id: jobId, worker_id: workerId, status: 'active' }]);
+        .insert([{ job_id: jobId, worker_id: workerId, status: 'active' }])
+        .then(({ error }) => {
+          if (error) console.warn('[contracts insert]', error.message);
+        });
 
-      if (contractError) throw contractError;
+      // 3. Find the job title for notifications
+      const job = jobs.find((j) => j.id === jobId);
+      const jobTitle = job?.title || 'Công việc';
 
-      triggerToast('Đã nhận sinh viên và khóa cọc 30 credits thành công! Dự án bắt đầu.', 'success');
-      loadJobsAndRelations();
+      // 4. Create/find conversation and notify the worker
+      supabase
+        .from('conversations')
+        .select('id')
+        .eq('job_id', jobId)
+        .eq('worker_id', workerId)
+        .limit(1)
+        .then(async ({ data: convs }) => {
+          let convId: string | null = convs?.[0]?.id || null;
+          if (!convId) {
+            const { data: newConv } = await supabase
+              .from('conversations')
+              .insert([{ job_id: jobId, worker_id: workerId }])
+              .select('id')
+              .single();
+            convId = newConv?.id || null;
+          }
+          supabase.from('notifications').insert([{
+            user_id: workerId,
+            conversation_id: convId,
+            type: 'job_confirmed',
+            content: `${jobTitle} đã được xác nhận`,
+          }]).then(() => {});
+        });
+
+      triggerToast('Đã xác nhận ứng viên thành công! Dự án bắt đầu.', 'success');
+      loadJobsAndRelations(false);
       refreshProfile();
     } catch (err: any) {
       console.error(err);
@@ -534,13 +597,30 @@ export default function Dashboard() {
 
   // Categories Filtering
   const employerPostedJobs = jobs.filter((j) => j.owner_id === profile.id);
-  const freelancerAvailableJobs = jobs.filter((j) => {
-    // Only show open jobs — in_progress/completed/cancelled are not claimable
-    if (j.status !== 'open') return false;
-    // Category filter
-    if (selectedCategory !== 'all' && j.category !== selectedCategory) return false;
-    return true;
-  });
+  const myApplicationJobIds = new Set(
+    applications.filter((a) => a.user_id === profile.id).map((a) => a.job_id)
+  );
+  const freelancerAvailableJobs = jobs
+    .filter((j) => {
+      // Only show open jobs — in_progress/completed/cancelled are not claimable
+      // Exception: show in_progress jobs assigned to current user (đã nhận)
+      if (j.status === 'in_progress' && j.assigned_worker_id === profile.id) {
+        // Include this job (user claimed it)
+      } else if (j.status !== 'open') {
+        return false;
+      }
+      // Applied-only filter
+      if (showAppliedOnly && !myApplicationJobIds.has(j.id)) return false;
+      // Category filter
+      if (selectedCategory !== 'all' && j.category !== selectedCategory) return false;
+      return true;
+    })
+    .sort((a, b) => {
+      // Applied jobs float to top
+      const aApplied = myApplicationJobIds.has(a.id) ? 1 : 0;
+      const bApplied = myApplicationJobIds.has(b.id) ? 1 : 0;
+      return bApplied - aApplied;
+    });
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col transition-colors selection:bg-indigo-500 selection:text-white">
@@ -726,9 +806,9 @@ export default function Dashboard() {
                 {CATEGORIES.map((cat) => (
                   <button
                     key={cat.value}
-                    onClick={() => setSelectedCategory(cat.value)}
+                    onClick={() => { setSelectedCategory(cat.value); setShowAppliedOnly(false); }}
                     className={`rounded-full px-4 py-1.5 text-xs font-bold transition-all cursor-pointer ${
-                      selectedCategory === cat.value
+                      selectedCategory === cat.value && !showAppliedOnly
                         ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md'
                         : 'border border-border-color bg-card-bg text-text-muted hover:text-foreground'
                     }`}
@@ -736,6 +816,17 @@ export default function Dashboard() {
                     {cat.label}
                   </button>
                 ))}
+                {/* Applied-only filter */}
+                <button
+                  onClick={() => setShowAppliedOnly((v) => !v)}
+                  className={`rounded-full px-4 py-1.5 text-xs font-bold transition-all cursor-pointer ${
+                    showAppliedOnly
+                      ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-md'
+                      : 'border border-indigo-400/40 bg-indigo-500/5 text-indigo-500 hover:text-indigo-600'
+                  }`}
+                >
+                  ✓ Đã ứng tuyển
+                </button>
               </div>
 
               <div className="flex items-center justify-between">
@@ -808,6 +899,18 @@ export default function Dashboard() {
         otherPartyName={chatOtherPartyName}
         activeUserId={profile.id}
         activeUserName={profile.name || 'Sinh viên'}
+      />
+
+      {/* 6. Floating Chat Button + Conversation List */}
+      <FloatingChat
+        activeUserId={profile.id}
+        activeUserName={profile.name || 'Sinh viên'}
+        onOpenConversation={(convId, jobTitle, otherName) => {
+          setChatJobTitle(jobTitle);
+          setChatOtherPartyName(otherName);
+          setActiveConversationId(convId);
+          setChatOpen(true);
+        }}
       />
     </div>
   );

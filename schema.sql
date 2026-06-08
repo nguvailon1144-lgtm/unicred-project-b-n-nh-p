@@ -752,3 +752,48 @@ BEGIN
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- =============================================================================
+-- MIGRATION: Chat system + Notifications upgrade
+-- Run these in Supabase SQL Editor (safe to run multiple times with IF NOT EXISTS)
+-- =============================================================================
+
+-- Step 4: Ensure notifications table has conversation_id and type columns
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS conversation_id UUID REFERENCES conversations(id) ON DELETE SET NULL;
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS type TEXT DEFAULT 'message';
+
+-- Step 5: Allow users to insert notifications for other users (needed for apply/accept flows)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE tablename = 'notifications' AND policyname = 'Allow insert notifications'
+  ) THEN
+    CREATE POLICY "Allow insert notifications" ON notifications FOR INSERT WITH CHECK (true);
+  END IF;
+END $$;
+
+-- Ensure RLS on notifications is enabled
+ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
+
+-- SELECT policy: users can only read their own notifications
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE tablename = 'notifications' AND policyname = 'Users can read own notifications'
+  ) THEN
+    CREATE POLICY "Users can read own notifications" ON notifications FOR SELECT USING (auth.uid() = user_id);
+  END IF;
+END $$;
+
+-- UPDATE policy: users can mark their own notifications as read
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE tablename = 'notifications' AND policyname = 'Users can update own notifications'
+  ) THEN
+    CREATE POLICY "Users can update own notifications" ON notifications FOR UPDATE USING (auth.uid() = user_id);
+  END IF;
+END $$;
+
+-- Enable Realtime on notifications table
+ALTER PUBLICATION supabase_realtime ADD TABLE notifications;

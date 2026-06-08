@@ -192,10 +192,10 @@ export default function Navbar() {
                 {notiDropdownOpen && (
                   <>
                     <div className="fixed inset-0 z-10" onClick={() => setNotiDropdownOpen(false)} />
-                    <div className="absolute right-0 mt-2.5 w-72 z-20 rounded-2xl border border-border-color bg-white dark:bg-slate-900 p-2 shadow-2xl animate-fade-in max-h-96 overflow-y-auto">
+                    <div className="absolute right-0 mt-2.5 w-80 z-20 rounded-2xl border border-border-color bg-white dark:bg-slate-900 p-2 shadow-2xl animate-fade-in max-h-96 overflow-y-auto">
                       <div className="px-3.5 py-2.5 border-b border-slate-200 dark:border-slate-800">
                         <span className="block text-xs font-black text-slate-900 dark:text-slate-100">
-                          Thông báo tin nhắn ({notifications.length})
+                          Thông báo mới ({notifications.length})
                         </span>
                       </div>
                       
@@ -204,23 +204,32 @@ export default function Navbar() {
                           Không có thông báo mới nào
                         </div>
                       ) : (
-                        notifications.map((noti) => (
-                          <button
-                            key={noti.id}
-                            onClick={() => {
-                              setNotiDropdownOpen(false);
-                              handleNotificationClick(noti);
-                            }}
-                            className="w-full flex flex-col items-start gap-1 rounded-xl px-3 py-2.5 text-xs text-left hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors mt-1 border border-transparent cursor-pointer"
-                          >
-                            <span className="font-bold text-slate-850 dark:text-slate-100 block truncate w-full">
-                              📩 {noti.content}
-                            </span>
-                            <span className="text-[9px] text-slate-400 font-bold block">
-                              {new Date(noti.created_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                          </button>
-                        ))
+                        notifications.map((noti) => {
+                          const hasChat = noti.conversation_id && (noti.type === 'job_applied' || noti.type === 'job_confirmed' || noti.type === 'message');
+                          const icon = noti.type === 'job_applied' ? '📩' : noti.type === 'job_confirmed' ? '✅' : '🔔';
+                          return (
+                            <button
+                              key={noti.id}
+                              onClick={() => {
+                                setNotiDropdownOpen(false);
+                                handleNotificationClick(noti);
+                              }}
+                              className="w-full flex flex-col items-start gap-1 rounded-xl px-3 py-2.5 text-xs text-left hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors mt-1 border border-transparent cursor-pointer"
+                            >
+                              <span className="font-bold text-slate-850 dark:text-slate-100 block w-full">
+                                {icon} {noti.content}
+                              </span>
+                              {hasChat && (
+                                <span className="text-[10px] text-indigo-500 font-bold flex items-center gap-1">
+                                  💬 Bấm vào đây để trò chuyện
+                                </span>
+                              )}
+                              <span className="text-[9px] text-slate-400 font-bold block">
+                                {new Date(noti.created_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            </button>
+                          );
+                        })
                       )}
                     </div>
                   </>
