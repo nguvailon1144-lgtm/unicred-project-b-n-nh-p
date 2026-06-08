@@ -271,6 +271,8 @@ CREATE TRIGGER trg_check_job_completion_approval
 -- 5. Handle refunds + bonuses on job completion or cancellation
 CREATE OR REPLACE FUNCTION handle_job_status_change()
 RETURNS trigger AS $$
+DECLARE
+  v_conv_id UUID;
 BEGIN
   -- Job Completed
   IF NEW.status = 'completed' AND OLD.status != 'completed' THEN
@@ -289,6 +291,16 @@ BEGIN
       
       -- Set contract status to completed if exists
       UPDATE contracts SET status = 'completed' WHERE job_id = NEW.id;
+
+      -- Get conversation ID if exists
+      SELECT id INTO v_conv_id FROM conversations WHERE job_id = NEW.id AND worker_id = NEW.assigned_worker_id LIMIT 1;
+
+      -- Notify both sides that the job is completed
+      INSERT INTO notifications (user_id, conversation_id, type, content, job_id)
+      VALUES (NEW.owner_id, v_conv_id, 'job_done_confirmed', NEW.title || ' đã hoàn thành', NEW.id);
+
+      INSERT INTO notifications (user_id, conversation_id, type, content, job_id)
+      VALUES (NEW.assigned_worker_id, v_conv_id, 'job_done_confirmed', NEW.title || ' đã hoàn thành', NEW.id);
     END IF;
 
   -- Job Cancelled
@@ -307,7 +319,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 DROP TRIGGER IF EXISTS trg_handle_job_status_change ON jobs;
 CREATE TRIGGER trg_handle_job_status_change
-  AFTER UPDATE OF status ON jobs
+  AFTER UPDATE ON jobs
   FOR EACH ROW EXECUTE FUNCTION handle_job_status_change();
 
 -- 6. Blind Review System visibility update
@@ -736,6 +748,8 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 CREATE OR REPLACE FUNCTION handle_job_status_change()
 RETURNS trigger AS $$
+DECLARE
+  v_conv_id UUID;
 BEGIN
   IF NEW.status = 'completed' AND OLD.status != 'completed' THEN
     UPDATE users SET credits = credits + 30 WHERE id = NEW.owner_id;
@@ -746,6 +760,16 @@ BEGIN
       INSERT INTO credit_logs (user_id, amount, type) VALUES (NEW.assigned_worker_id, 30, 'job_completed_refund_bonus');
       UPDATE users SET trust_score = trust_score + 1 WHERE id = NEW.assigned_worker_id;
       UPDATE contracts SET status = 'completed' WHERE job_id = NEW.id;
+      
+      -- Get conversation ID if exists
+      SELECT id INTO v_conv_id FROM conversations WHERE job_id = NEW.id AND worker_id = NEW.assigned_worker_id LIMIT 1;
+
+      -- Notify both sides that the job is completed
+      INSERT INTO notifications (user_id, conversation_id, type, content, job_id)
+      VALUES (NEW.owner_id, v_conv_id, 'job_done_confirmed', NEW.title || ' đã hoàn thành', NEW.id);
+
+      INSERT INTO notifications (user_id, conversation_id, type, content, job_id)
+      VALUES (NEW.assigned_worker_id, v_conv_id, 'job_done_confirmed', NEW.title || ' đã hoàn thành', NEW.id);
     END IF;
   ELSIF NEW.status = 'cancelled' AND OLD.status != 'cancelled' THEN
     UPDATE users SET trust_score = GREATEST(0, trust_score - 1) WHERE id = NEW.owner_id;
@@ -756,6 +780,11 @@ BEGIN
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trg_handle_job_status_change ON jobs;
+CREATE TRIGGER trg_handle_job_status_change
+  AFTER UPDATE ON jobs
+  FOR EACH ROW EXECUTE FUNCTION handle_job_status_change();
 
 -- =============================================================================
 -- MIGRATION: Chat system + Notifications upgrade
