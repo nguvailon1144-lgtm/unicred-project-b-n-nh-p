@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/components/AuthProvider';
 import { supabase } from '@/lib/supabaseClient';
 import Link from 'next/link';
+import { parseUtcDate } from '@/lib/vietnamTime';
 
 export default function Navbar() {
   const { profile, loading, signOut } = useAuth();
@@ -45,7 +46,7 @@ export default function Navbar() {
 
   // Subscribe to realtime notifications
   useEffect(() => {
-    if (!profile) return;
+    if (!profile?.id) return;
 
     fetchNotifications();
 
@@ -75,7 +76,7 @@ export default function Navbar() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [profile]);
+  }, [profile?.id]);
 
   // Request browser notification permissions on mount if not already granted
   useEffect(() => {
@@ -217,7 +218,7 @@ export default function Navbar() {
                         [...notifications]
                           .sort((a, b) => {
                             if (a.is_read !== b.is_read) return a.is_read ? 1 : -1;
-                            return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+                            return parseUtcDate(b.created_at).getTime() - parseUtcDate(a.created_at).getTime();
                           })
                           .map((noti) => {
                             const isRead = noti.is_read;
@@ -264,7 +265,7 @@ export default function Navbar() {
                                 <span className={`text-[9px] font-bold block ${
                                   isRead ? 'text-slate-300' : 'text-slate-400'
                                 }`}>
-                                  {new Date(noti.created_at).toLocaleTimeString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit' })}
+                                  {parseUtcDate(noti.created_at).toLocaleTimeString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit' })}
                                 </span>
                               </button>
                             );

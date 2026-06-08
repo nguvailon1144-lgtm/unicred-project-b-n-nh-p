@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { formatDateVN } from '@/lib/vietnamTime';
 
 export interface Job {
   id: string;
@@ -166,16 +167,8 @@ export default function JobCard({
     }
   };
 
-  // Date parsing to dd/mm/yyyy
-  const formatVietnameseDate = (isoString?: string) => {
-    if (!isoString) return 'Không giới hạn';
-    const dateObj = new Date(isoString);
-    if (isNaN(dateObj.getTime())) return 'Không giới hạn';
-    const day = String(dateObj.getDate()).padStart(2, '0');
-    const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-    const year = dateObj.getFullYear();
-    return `${day}/${month}/${year}`;
-  };
+  // Date parsing to dd/mm/yyyy (Vietnam timezone)
+  const formatVietnameseDate = formatDateVN;
 
   // Extract reputations
   const ownerRep = job.owner?.client_reputation ?? job.owner?.reputation ?? 100;

@@ -120,7 +120,7 @@ CREATE TABLE conversations (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   job_id UUID REFERENCES jobs(id) ON DELETE CASCADE,
   worker_id UUID REFERENCES users(id) ON DELETE CASCADE,
-  created_at TIMESTAMP DEFAULT now(),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
   UNIQUE(job_id, worker_id)
 );
 
@@ -130,8 +130,8 @@ CREATE TABLE messages (
   sender_id UUID REFERENCES users(id) ON DELETE CASCADE,
   content TEXT NOT NULL,
   seen BOOLEAN DEFAULT false,
-  seen_at TIMESTAMP,
-  created_at TIMESTAMP DEFAULT now()
+  seen_at TIMESTAMP WITH TIME ZONE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
 -- =======================================================
@@ -144,7 +144,7 @@ CREATE TABLE notifications (
   type TEXT,
   content TEXT,
   is_read BOOLEAN DEFAULT false,
-  created_at TIMESTAMP DEFAULT now()
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
 -- =======================================================
@@ -714,7 +714,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Also simplify accept trigger to validation-only
+-- Restore accept trigger to deduct 20 credits from freelancer when accepted (Staking Mechanism)
 CREATE OR REPLACE FUNCTION check_job_accept_credits()
 RETURNS trigger AS $$
 DECLARE
@@ -725,6 +725,10 @@ BEGIN
     IF v_credits < 20 THEN
       RAISE EXCEPTION 'Số Credits của ứng viên không đủ để nhận việc (cần 20 credits cọc).';
     END IF;
+    -- Deduct 20 credits from the worker
+    UPDATE users SET credits = credits - 20 WHERE id = NEW.assigned_worker_id;
+    -- Insert a credit log
+    INSERT INTO credit_logs (user_id, amount, type) VALUES (NEW.assigned_worker_id, -20, 'job_claim_stake');
   END IF;
   RETURN NEW;
 END;
@@ -800,3 +804,14 @@ ALTER PUBLICATION supabase_realtime ADD TABLE notifications;
 
 -- Step 6: Ensure notifications table has job_id column (for job completion redirect)
 ALTER TABLE notifications ADD COLUMN IF NOT EXISTS job_id UUID REFERENCES jobs(id) ON DELETE SET NULL;
+
+-- Step 7: Ensure created_at and seen_at columns use TIMESTAMP WITH TIME ZONE
+ALTER TABLE conversations ALTER COLUMN created_at TYPE TIMESTAMP WITH TIME ZONE;
+ALTER TABLE conversations ALTER COLUMN created_at SET DEFAULT timezone('utc'::text, now());
+
+ALTER TABLE messages ALTER COLUMN created_at TYPE TIMESTAMP WITH TIME ZONE;
+ALTER TABLE messages ALTER COLUMN created_at SET DEFAULT timezone('utc'::text, now());
+ALTER TABLE messages ALTER COLUMN seen_at TYPE TIMESTAMP WITH TIME ZONE;
+
+ALTER TABLE notifications ALTER COLUMN created_at TYPE TIMESTAMP WITH TIME ZONE;
+ALTER TABLE notifications ALTER COLUMN created_at SET DEFAULT timezone('utc'::text, now());

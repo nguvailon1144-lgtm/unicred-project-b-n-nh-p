@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabaseClient';
+import { parseUtcDate } from '@/lib/vietnamTime';
 
 interface ConvRow {
   id: string;
@@ -162,7 +163,7 @@ export default function FloatingChat({
         if (!a.lastMessageTime && !b.lastMessageTime) return 0;
         if (!a.lastMessageTime) return 1;
         if (!b.lastMessageTime) return -1;
-        return new Date(b.lastMessageTime).getTime() - new Date(a.lastMessageTime).getTime();
+        return parseUtcDate(b.lastMessageTime).getTime() - parseUtcDate(a.lastMessageTime).getTime();
       });
 
       setConversations(result);
@@ -316,7 +317,7 @@ export default function FloatingChat({
                       )}
                       {conv.lastMessageTime && (
                         <span className="text-[9px] text-slate-300 font-bold flex-shrink-0">
-                          {new Date(conv.lastMessageTime).toLocaleTimeString('vi-VN', {
+                          {parseUtcDate(conv.lastMessageTime).toLocaleTimeString('vi-VN', {
                             timeZone: 'Asia/Ho_Chi_Minh',
                             hour: '2-digit',
                             minute: '2-digit',

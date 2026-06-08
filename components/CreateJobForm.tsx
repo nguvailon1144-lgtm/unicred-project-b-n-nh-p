@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabaseClient';
+import { todayVN, addDaysVN, deadlineToVNIso, isDeadlineInFutureVN } from '@/lib/vietnamTime';
 import { Job } from './JobCard';
 
 interface CreateJobFormProps {
@@ -38,11 +39,9 @@ export default function CreateJobForm({
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
-  // Default deadline (7 days from now)
+  // Default deadline (7 days from now, Vietnam time)
   useEffect(() => {
-    const defaultDate = new Date();
-    defaultDate.setDate(defaultDate.getDate() + 7);
-    setDeadline(defaultDate.toISOString().split('T')[0]);
+    setDeadline(addDaysVN(todayVN(), 7));
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -70,8 +69,7 @@ export default function CreateJobForm({
 
     if (!description.trim()) return setErrorMsg('Vui lòng nhập mô tả chi tiết công việc.');
 
-    const selectedDeadline = new Date(deadline);
-    if (isNaN(selectedDeadline.getTime()) || selectedDeadline < new Date()) {
+    if (!isDeadlineInFutureVN(deadline)) {
       return setErrorMsg('Vui lòng chọn thời hạn hoàn thành trong tương lai.');
     }
 
@@ -110,7 +108,7 @@ export default function CreateJobForm({
               price: numericPrice,
               status: 'open',
               owner_id: activeUserId,
-              deadline: selectedDeadline.toISOString(),
+              deadline: deadlineToVNIso(deadline),
               category,
               location: location.trim() || 'Online',
               is_flagged: isFlagged,
@@ -152,9 +150,7 @@ export default function CreateJobForm({
         setLocation('');
         setCategory('coding');
         
-        const defaultDate = new Date();
-        defaultDate.setDate(defaultDate.getDate() + 7);
-        setDeadline(defaultDate.toISOString().split('T')[0]);
+        setDeadline(addDaysVN(todayVN(), 7));
 
         // Trigger updates in parent dashboard
         onCreditsUpdated(userCredits - 20);

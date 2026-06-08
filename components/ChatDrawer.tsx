@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { supabase } from '@/lib/supabaseClient';
+import { parseUtcDate } from '@/lib/vietnamTime';
 
 interface Message {
   id: string;
@@ -284,7 +285,7 @@ export default function ChatDrawer({
 
   // Format date and time in Vietnam timezone
   const formatTime = useCallback((isoString: string) => {
-    const d = new Date(isoString);
+    const d = parseUtcDate(isoString);
     if (isNaN(d.getTime())) return '';
     return d.toLocaleTimeString('vi-VN', {
       timeZone: 'Asia/Ho_Chi_Minh',
@@ -296,7 +297,7 @@ export default function ChatDrawer({
   // Format seen time in Vietnam timezone
   const formatSeenTime = useCallback((isoString: string | null) => {
     if (!isoString) return '';
-    const d = new Date(isoString);
+    const d = parseUtcDate(isoString);
     if (isNaN(d.getTime())) return '';
     return d.toLocaleTimeString('vi-VN', {
       timeZone: 'Asia/Ho_Chi_Minh',

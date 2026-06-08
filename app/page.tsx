@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/components/AuthProvider';
 import Navbar from '@/components/Navbar';
@@ -69,6 +69,20 @@ export default function Dashboard() {
   // Track whether the initial data load has been done so refreshProfile()
   // changes don't re-trigger a full reload (which flashes the loading skeleton).
   const hasLoadedRef = React.useRef(false);
+
+  // Incremented on each load request; only the latest request may update state.
+  // Also bumped by the safety timeout to cancel hung fetches.
+  const loadGenerationRef = useRef(0);
+
+  // Safety: if loadingFeed ever gets stuck, clear it and invalidate hung fetches.
+  useEffect(() => {
+    if (!loadingFeed) return;
+    const t = setTimeout(() => {
+      loadGenerationRef.current += 1;
+      setLoadingFeed(false);
+    }, 15000);
+    return () => clearTimeout(t);
+  }, [loadingFeed]);
 
   // Trigger Toast notifications
   const triggerToast = (message: string, type: 'success' | 'info' | 'error' = 'info') => {
@@ -182,22 +196,36 @@ export default function Dashboard() {
 
   const loadJobsAndRelations = async (showLoadingIndicator = true) => {
     if (!profile) return;
-    try {
-      if (showLoadingIndicator) setLoadingFeed(true);
+    const generation = ++loadGenerationRef.current;
+    if (showLoadingIndicator) setLoadingFeed(true);
 
+    const FETCH_TIMEOUT_MS = 12000;
+    const withTimeout = <T,>(promise: PromiseLike<T>): Promise<T> =>
+      Promise.race([
+        Promise.resolve(promise),
+        new Promise<T>((_, reject) =>
+          setTimeout(() => reject(new Error('Feed load timeout')), FETCH_TIMEOUT_MS)
+        ),
+      ]);
+
+    try {
       const [
         jobsResult,
         appsResult,
         contractsResult,
         repLogsResult,
         appealsResult,
-      ] = await Promise.all([
-        supabase.from('jobs').select('*').order('created_at', { ascending: false }),
-        supabase.from('job_applications').select('*'),
-        supabase.from('contracts').select('*'),
-        supabase.from('reputation_logs').select('*').or(`rater_id.eq.${profile.id},rated_user_id.eq.${profile.id}`),
-        supabase.from('appeals').select('*').eq('user_id', profile.id),
-      ]);
+      ] = await withTimeout(
+        Promise.all([
+          supabase.from('jobs').select('*').order('created_at', { ascending: false }),
+          supabase.from('job_applications').select('*'),
+          supabase.from('contracts').select('*'),
+          supabase.from('reputation_logs').select('*').or(`rater_id.eq.${profile.id},rated_user_id.eq.${profile.id}`),
+          supabase.from('appeals').select('*').eq('user_id', profile.id),
+        ])
+      );
+
+      if (generation !== loadGenerationRef.current) return;
 
       // Jobs table is critical — throw if it fails
       if (jobsResult.error) throw jobsResult.error;
@@ -273,16 +301,21 @@ export default function Dashboard() {
         worker: usersMap[c.worker_id] || null,
       }));
 
+      if (generation !== loadGenerationRef.current) return;
+
       setJobs(jobsWithOwner as Job[]);
       setApplications(appsWithUser as Application[]);
       setContracts(contractsWithWorker as Contract[]);
       setReputationLogs(repLogsResult.data || []);
       setUserAppeals(appealsResult.data || []);
     } catch (err: any) {
+      if (generation !== loadGenerationRef.current) return;
       console.error('Failed to load marketplace feeds:', err);
       triggerToast(err.message || 'Lỗi kết nối cơ sở dữ liệu Supabase.', 'error');
     } finally {
-      setLoadingFeed(false);
+      if (generation === loadGenerationRef.current) {
+        setLoadingFeed(false);
+      }
     }
   };
 
@@ -298,26 +331,25 @@ export default function Dashboard() {
 
   // Silently refresh the jobs feed whenever the user switches to the earn tab,
   // so newly posted jobs (by other users) appear without needing a page refresh.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (activeView === 'earn') {
-      // Always do a fresh silent reload when switching to the earn tab,
-      // regardless of whether the initial load has run yet.
-      if (profile) loadJobsAndRelations(false);
+    if (activeView === 'earn' && profile?.id) {
+      loadJobsAndRelations(false);
     }
-  }, [activeView, profile]);
+  }, [activeView]);
 
   // Supabase Realtime Subscription Channel
   useEffect(() => {
-    if (!profile) return;
+    if (!profile?.id) return;
 
+    const channelId = `live-marketplace-${profile.id.slice(0, 8)}`;
     const channel = supabase
-      .channel('live-marketplace')
+      .channel(channelId)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'jobs' },
         () => {
-          loadJobsAndRelations(false); // silent — no skeleton flash
+          loadJobsAndRelations(false);
+          refreshProfile();
         }
       )
       .on(
@@ -371,7 +403,7 @@ export default function Dashboard() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [profile]);
+  }, [profile?.id]);
 
   // Handler: Apply to a job listing (Freelancer Action)
   const handleApplyToJob = async (jobId: string) => {
@@ -387,7 +419,7 @@ export default function Dashboard() {
 
       if (error) throw error;
 
-      triggerToast('Ứng tuyển thành công! Vui lòng đợi nhà tuyển dụng phản hồi.', 'success');
+      triggerToast('Ứng tuyển thành công! 20 credits cọc sẽ được trừ khi bạn được chọn.', 'success');
 
       // Find the job owner to notify them
       const job = jobs.find((j) => j.id === jobId);
@@ -429,7 +461,21 @@ export default function Dashboard() {
   // Handler: Hires a candidate (Employer Action)
   const handleAcceptApplicant = async (jobId: string, workerId: string) => {
     try {
-      // 1. Update Job state to in_progress — this is the critical write, must succeed
+      // 1. Validate worker has enough credits to stake (DB trigger is validation-only)
+      const { data: workerData, error: workerFetchErr } = await supabase
+        .from('users')
+        .select('credits')
+        .eq('id', workerId)
+        .single();
+
+      if (workerFetchErr || !workerData) {
+        throw new Error('Không tìm thấy hồ sơ ứng viên.');
+      }
+      if (workerData.credits < 20) {
+        throw new Error('Số Credits của ứng viên không đủ để nhận việc (cần 20 credits cọc).');
+      }
+
+      // 2. Update Job state to in_progress — this is the critical write, must succeed
       const { error: jobError } = await supabase
         .from('jobs')
         .update({ 
@@ -440,7 +486,9 @@ export default function Dashboard() {
 
       if (jobError) throw jobError;
 
-      // 2. Insert Contract non-blocking (avoids RLS hang on contracts table)
+      // 3. Deduct 20 staking credits from the worker (handled automatically by DB trigger check_job_accept_credits)
+
+      // 4. Insert Contract non-blocking (avoids RLS hang on contracts table)
       supabase
         .from('contracts')
         .insert([{ job_id: jobId, worker_id: workerId, status: 'active' }])
@@ -448,11 +496,11 @@ export default function Dashboard() {
           if (error) console.warn('[contracts insert]', error.message);
         });
 
-      // 3. Find the job title for notifications
+      // 5. Find the job title for notifications
       const job = jobs.find((j) => j.id === jobId);
       const jobTitle = job?.title || 'Công việc';
 
-      // 4. Create/find conversation and notify the worker
+      // 6. Create/find conversation and notify the worker
       supabase
         .from('conversations')
         .select('id')

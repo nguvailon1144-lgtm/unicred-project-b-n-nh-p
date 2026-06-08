@@ -55,6 +55,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // listener doesn't race with it, causing double fetches and flicker.
   const isInitializing = useRef(true);
 
+  const userRef = useRef<User | null>(null);
+  const profileRef = useRef<UserProfile | null>(null);
+
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
+
+  useEffect(() => {
+    profileRef.current = profile;
+  }, [profile]);
+
   const buildFallbackProfile = (uid: string, email: string): UserProfile => ({
     id: uid,
     email,
@@ -81,11 +92,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const fetchProfile = async (uid: string, email = '') => {
     try {
       console.log(`[Auth] Đang tải hồ sơ sinh viên cho UID: ${uid}`);
-      const { data, error } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', uid)
-        .single();
+      const PROFILE_TIMEOUT_MS = 8000;
+      const { data, error } = await Promise.race([
+        supabase.from('users').select('*').eq('id', uid).single(),
+        new Promise<{ data: null; error: { message: string } }>((resolve) =>
+          setTimeout(() => resolve({ data: null, error: { message: 'Profile fetch timeout' } }), PROFILE_TIMEOUT_MS)
+        ),
+      ]);
 
       if (error || !data) {
         console.log('Profile not found, creating automatically');
@@ -161,37 +174,53 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     initUser();
 
+    // Safety timeout: if loading is still true after 10 seconds, force-clear it.
+    // Prevents permanent stuck-loading if Supabase never responds.
+    const safetyTimeout = setTimeout(() => {
+      setLoading((prev) => {
+        if (prev) console.warn('[Auth] Loading timeout — clearing stuck state');
+        return false;
+      });
+    }, 10000);
+
     // Listen to active auth events
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log(`[Auth Event] Sự kiện Auth thay đổi: ${event}`);
 
-      // Bug 1 & 2 Fix: While initUser is still running, ignore listener events
-      // to prevent double fetches and loading-state races.
+      // While initUser is still running, ignore listener events
       if (isInitializing.current) {
         console.log('[Auth] initUser đang chạy, bỏ qua sự kiện listener.');
         return;
       }
 
       const activeUser = session?.user ?? null;
+
+      // For TOKEN_REFRESHED and visibility-driven session checks, skip profile re-fetch
+      // This prevents unnecessary DB calls and state thrashing on tab refocus
+      if (
+        (event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN') &&
+        activeUser?.id === userRef.current?.id &&
+        profileRef.current
+      ) {
+        console.log('[Auth] Session refreshed, same user — skipping profile re-fetch.');
+        return;
+      }
+
       setUser(activeUser);
 
       if (activeUser) {
-        // Only re-fetch if the user actually changed (e.g., a different account signed in)
         await fetchProfile(activeUser.id, activeUser.email || '');
       } else {
         setProfile(null);
       }
-      setLoading(false);
 
-      // Bug 3 Fix: Removed router.push('/') on SIGNED_IN here.
-      // The login page no longer needs a competing redirect — the route
-      // protection effect below handles navigation once loading is done.
-      if (event === 'SIGNED_OUT') {
-        // Handled by signOut function below
+      if (event !== 'TOKEN_REFRESHED') {
+        setLoading(false);
       }
     });
 
     return () => {
+      clearTimeout(safetyTimeout);
       subscription.unsubscribe();
     };
   }, []);
