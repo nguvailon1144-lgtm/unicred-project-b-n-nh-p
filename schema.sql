@@ -600,6 +600,7 @@ CREATE POLICY "Users can view public or related reputation logs" ON reputation_l
   EXISTS (SELECT 1 FROM users WHERE id = auth.uid() AND role = 'admin')
 );
 CREATE POLICY "Users can insert own reputation logs" ON reputation_logs FOR INSERT TO authenticated WITH CHECK (auth.uid() = rater_id);
+CREATE POLICY "Users can delete own reputation logs" ON reputation_logs FOR DELETE USING (auth.uid() = rater_id OR EXISTS (SELECT 1 FROM users WHERE id = auth.uid() AND role = 'admin'));
 
 -- appeals policies
 CREATE POLICY "Users can view own appeals or admin" ON appeals FOR SELECT USING (
@@ -844,3 +845,59 @@ ALTER TABLE messages ALTER COLUMN seen_at TYPE TIMESTAMP WITH TIME ZONE;
 
 ALTER TABLE notifications ALTER COLUMN created_at TYPE TIMESTAMP WITH TIME ZONE;
 ALTER TABLE notifications ALTER COLUMN created_at SET DEFAULT timezone('utc'::text, now());
+
+-- Step 8: Ensure reputation_logs has DELETE policy in DB and register low rating/removal triggers
+CREATE OR REPLACE FUNCTION handle_reputation_log_change()
+RETURNS trigger AS $$
+DECLARE
+  v_job_title TEXT;
+  v_conv_id UUID;
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    -- Check if rater is the owner of the job (poster rating the claimer)
+    IF EXISTS (SELECT 1 FROM jobs WHERE id = NEW.job_id AND owner_id = NEW.rater_id) THEN
+      IF NEW.stars <= 2 AND NEW.proof_image_url IS NOT NULL THEN
+        -- Deduct 30 credits from worker (net refund 0)
+        UPDATE users SET credits = GREATEST(0, credits - 30) WHERE id = NEW.rated_user_id;
+        
+        -- Log
+        INSERT INTO credit_logs (user_id, amount, type)
+        VALUES (NEW.rated_user_id, -30, 'low_rating_penalty');
+        
+        -- Get job title and conversation
+        SELECT title INTO v_job_title FROM jobs WHERE id = NEW.job_id;
+        SELECT id INTO v_conv_id FROM conversations WHERE job_id = NEW.job_id AND worker_id = NEW.rated_user_id LIMIT 1;
+        
+        -- Notify claimer
+        INSERT INTO notifications (user_id, conversation_id, type, content, job_id)
+        VALUES (NEW.rated_user_id, v_conv_id, 'low_rating_received', 'Bạn đã nhận một đánh giá thấp từ công việc ' || v_job_title, NEW.job_id);
+      END IF;
+    END IF;
+  ELSIF TG_OP = 'DELETE' THEN
+    -- If a low rating (which deducted 30 credits) is removed, return 30 credits
+    IF EXISTS (SELECT 1 FROM jobs WHERE id = OLD.job_id AND owner_id = OLD.rater_id) THEN
+      IF OLD.stars <= 2 AND OLD.proof_image_url IS NOT NULL THEN
+        UPDATE users SET credits = credits + 30 WHERE id = OLD.rated_user_id;
+        INSERT INTO credit_logs (user_id, amount, type)
+        VALUES (OLD.rated_user_id, 30, 'low_rating_refunded');
+      END IF;
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trg_handle_reputation_log_change ON reputation_logs;
+CREATE TRIGGER trg_handle_reputation_log_change
+  AFTER INSERT OR DELETE ON reputation_logs
+  FOR EACH ROW EXECUTE FUNCTION handle_reputation_log_change();
+
+-- Allow users to delete their own reputation logs
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE tablename = 'reputation_logs' AND policyname = 'Users can delete own reputation logs'
+  ) THEN
+    CREATE POLICY "Users can delete own reputation logs" ON reputation_logs FOR DELETE USING (auth.uid() = rater_id OR EXISTS (SELECT 1 FROM users WHERE id = auth.uid() AND role = 'admin'));
+  END IF;
+END $$;

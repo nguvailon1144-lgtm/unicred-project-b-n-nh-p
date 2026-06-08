@@ -262,6 +262,11 @@ export default function Navbar() {
                                     Chúc bạn một ngày mới tốt lành! 🌟
                                   </span>
                                 )}
+                                {noti.type === 'low_rating_received' && (
+                                  <span className="text-[10px] text-rose-500 font-bold block mt-0.5 leading-relaxed">
+                                    Hãy liên hệ với người thuê để gỡ bỏ đánh giá hoặc liên hệ với chúng tôi qua unicredadmin@gmail.com
+                                  </span>
+                                )}
                                 <span className={`text-[9px] font-bold block ${
                                   isRead ? 'text-slate-300' : 'text-slate-400'
                                 }`}>

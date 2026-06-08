@@ -74,6 +74,7 @@ interface JobCardProps {
   userAppeals?: any[];
   onWithdrawApplication?: (jobId: string) => Promise<void>;
   onDeleteJob?: (jobId: string) => Promise<void>;
+  onDeleteReview?: (reviewId: string) => Promise<void>;
 }
 
 const CATEGORY_MAP: Record<string, string> = {
@@ -103,6 +104,7 @@ export default function JobCard({
   userAppeals = [],
   onWithdrawApplication,
   onDeleteJob,
+  onDeleteReview,
 }: JobCardProps) {
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   // 'withdraw' | 'delete' | null — tracks which inline confirm is showing
@@ -492,8 +494,20 @@ export default function JobCard({
                       ⭐ Đánh giá Freelancer (Đánh giá ẩn)
                     </button>
                   ) : (
-                    <div className="text-center text-xs text-text-muted bg-slate-100 rounded-xl py-2 border border-slate-200">
-                      Bạn đã đánh giá Freelancer: {myReview.stars} ⭐
+                    <div className="text-center text-xs text-text-muted bg-slate-100 rounded-xl py-2 border border-slate-200 flex items-center justify-between px-3">
+                      <span>Bạn đã đánh giá Freelancer: {myReview.stars} ⭐</span>
+                      {activeView === 'hire' && onDeleteReview && (
+                        <button
+                          onClick={() => {
+                            if (confirm('Bạn có chắc chắn muốn gỡ bỏ đánh giá này?')) {
+                              onDeleteReview(myReview.id);
+                            }
+                          }}
+                          className="text-[10px] font-bold text-rose-500 hover:text-rose-600 hover:underline cursor-pointer border-0 bg-transparent py-0.5 px-1.5 rounded"
+                        >
+                          Xóa
+                        </button>
+                      )}
                     </div>
                   )}
 

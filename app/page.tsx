@@ -702,6 +702,24 @@ export default function Dashboard() {
     }
   };
 
+  const handleDeleteReview = async (reviewId: string) => {
+    try {
+      const { error } = await supabase
+        .from('reputation_logs')
+        .delete()
+        .eq('id', reviewId);
+
+      if (error) throw error;
+
+      triggerToast('Đã gỡ bỏ đánh giá thành công.', 'success');
+      loadJobsAndRelations();
+      refreshProfile();
+    } catch (err: any) {
+      console.error('[deleteReview] error:', err);
+      triggerToast(err.message || 'Lỗi khi xóa đánh giá.', 'error');
+    }
+  };
+
   // Handler: Submit appeal for low rating (SLA 72h)
   const handleSubmitAppeal = async (
     reputationLogId: string,
@@ -939,6 +957,7 @@ export default function Dashboard() {
                         jobReviews={reputationLogs}
                         userAppeals={userAppeals}
                         onDeleteJob={handleDeleteJob}
+                        onDeleteReview={handleDeleteReview}
                       />
                     ))}
                   </div>
@@ -1032,6 +1051,7 @@ export default function Dashboard() {
                       jobReviews={reputationLogs}
                       userAppeals={userAppeals}
                       onWithdrawApplication={handleWithdrawApplication}
+                      onDeleteReview={handleDeleteReview}
                     />
                   ))}
                 </div>
