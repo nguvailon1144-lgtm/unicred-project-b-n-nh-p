@@ -90,8 +90,6 @@ export default function CreateJobForm({
     }
 
     try {
-      // Wrap the insert in a 30-second timeout so the button never stays stuck
-      // if the network drops or the DB trigger causes a silent hang.
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 30_000);
 
@@ -131,8 +129,6 @@ export default function CreateJobForm({
       if (insertError) throw insertError;
 
       if (data) {
-        // Deduct 20 staking credits on the frontend (trigger is validation-only).
-        // This is non-blocking — the job is already posted successfully.
         supabase
           .from('users')
           .update({ credits: Math.max(0, userCredits - 20) })
@@ -143,7 +139,6 @@ export default function CreateJobForm({
 
         setSuccessMsg(`Đăng việc thành công! Đã trừ 20 credits cọc.`);
         
-        // Reset form inputs (retaining default future date)
         setTitle('');
         setPrice('');
         setDescription('');
@@ -152,7 +147,6 @@ export default function CreateJobForm({
         
         setDeadline(addDaysVN(todayVN(), 7));
 
-        // Trigger updates in parent dashboard
         onCreditsUpdated(userCredits - 20);
         onJobCreated(data as Job);
       }
@@ -164,54 +158,64 @@ export default function CreateJobForm({
     }
   };
 
+  // COMMON INPUT CLASS TO KEEP UI CONSISTENT
+  const inputClassName = "w-full rounded-xl border border-slate-200/80 bg-slate-50/50 px-4 py-3.5 text-sm font-medium text-slate-800 outline-none transition-all placeholder:text-slate-400 focus:border-indigo-500 focus:bg-white focus:ring-4 focus:ring-indigo-500/10 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-indigo-400 dark:focus:ring-indigo-400/10";
+  const labelClassName = "mb-1.5 block text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400";
+
   return (
-    <div className="relative rounded-2xl border border-border-color bg-card-bg p-6 shadow-md">
-      <h2 className="text-xl font-bold text-foreground mb-1">Đăng công việc mới</h2>
-      <p className="text-xs text-text-muted mb-6">
-        Thuê sinh viên làm freelancer. 20 credits sẽ được trừ cho mỗi công việc được đăng và sẽ được hoàn trả sau khi công việc được hoàn thành..
-      </p>
+    <div className="relative rounded-3xl border border-slate-200/60 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:p-7">
+      
+      {/* Header Section */}
+      <div className="mb-8">
+        <h2 className="mb-1.5 text-2xl font-black tracking-tight text-slate-900 dark:text-white">
+          ✨ Đăng công việc
+        </h2>
+        <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
+          Thuê sinh viên làm freelancer. <span className="font-bold text-indigo-500">20 credits</span> sẽ được đặt cọc và hoàn trả sau khi nghiệm thu.
+        </p>
+      </div>
 
       {/* Info/Error Banners */}
       {errorMsg && (
-        <div className="mb-4 rounded-xl border border-rose-500/30 bg-rose-500/10 p-3.5 text-xs font-semibold text-rose-500">
-          ⚠️ {errorMsg}
+        <div className="mb-6 flex items-center gap-3 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm font-bold text-rose-600 dark:border-rose-900/50 dark:bg-rose-900/20 dark:text-rose-400">
+          <span className="text-lg">⚠️</span> {errorMsg}
         </div>
       )}
 
       {successMsg && (
-        <div className="mb-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3.5 text-xs font-semibold text-emerald-500">
-          ✓ {successMsg}
+        <div className="mb-6 flex items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-bold text-emerald-600 dark:border-emerald-900/50 dark:bg-emerald-900/20 dark:text-emerald-400">
+          <span className="text-lg">✓</span> {successMsg}
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-5">
         {/* Title */}
         <div>
-          <label htmlFor="title" className="block text-xs font-bold uppercase tracking-wider text-text-muted mb-1.5">
+          <label htmlFor="title" className={labelClassName}>
             Tiêu đề công việc
           </label>
           <input
             id="title"
             type="text"
-            placeholder="Ví dụ: Lập trình Landing Page tuyển sinh FTU"
+            placeholder="Ví dụ: Lập trình Landing Page tuyển sinh FTU..."
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             disabled={isSubmitting}
-            className="w-full form-input rounded-xl px-4 py-3 text-sm"
+            className={inputClassName}
           />
         </div>
 
         {/* Category Selection */}
         <div>
-          <label htmlFor="category" className="block text-xs font-bold uppercase tracking-wider text-text-muted mb-1.5">
-            Danh mục công việc
+          <label htmlFor="category" className={labelClassName}>
+            Danh mục
           </label>
           <select
             id="category"
             value={category}
             onChange={(e) => setCategory(e.target.value)}
             disabled={isSubmitting}
-            className="w-full form-input rounded-xl px-4 py-3 text-sm cursor-pointer"
+            className={`${inputClassName} cursor-pointer appearance-none`}
           >
             {CATEGORIES.map((cat) => (
               <option key={cat.value} value={cat.value}>
@@ -221,98 +225,11 @@ export default function CreateJobForm({
           </select>
         </div>
 
-        {/* Budget & Deadline Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Budget & Deadline Grid (Fixed Layout & Alignment) */}
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
           {/* Price */}
           <div>
-            <label htmlFor="price" className="block text-xs font-bold uppercase tracking-wider text-text-muted mb-1.5">
+            <label htmlFor="price" className={labelClassName}>
               Tiền công (VNĐ)
             </label>
-            <div className="relative">
-              <input
-                id="price"
-                type="number"
-                placeholder="Ví dụ: 150000"
-                value={price}
-                onChange={(e) => setPrice(e.target.value)}
-                disabled={isSubmitting}
-                className="w-full form-input rounded-xl pl-4 pr-12 py-3 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-              />
-              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-text-muted">
-                đ
-              </span>
-            </div>
-          </div>
-
-          {/* Deadline */}
-          <div>
-            <label htmlFor="deadline" className="block text-xs font-bold uppercase tracking-wider text-text-muted mb-1.5">
-              Hạn chót công việc
-            </label>
-            <input
-              id="deadline"
-              type="date"
-              value={deadline}
-              onChange={(e) => setDeadline(e.target.value)}
-              disabled={isSubmitting}
-              className="w-full form-input rounded-xl px-4 py-3 text-sm color-scheme-dark"
-            />
-            {deadline && (
-              <p className="text-[10px] text-text-muted mt-1">
-                → {deadline.split('-').reverse().join('/')}
-              </p>
-            )}
-          </div>
-        </div>
-
-        {/* Location (optional) */}
-        <div>
-          <label htmlFor="location" className="block text-xs font-bold uppercase tracking-wider text-text-muted mb-1.5">
-            Địa điểm làm việc (Không bắt buộc)
-          </label>
-          <input
-            id="location"
-            type="text"
-            placeholder="Ví dụ: Online hoặc Cơ sở 1 HUST, FTU..."
-            value={location}
-            onChange={(e) => setLocation(e.target.value)}
-            disabled={isSubmitting}
-            className="w-full form-input rounded-xl px-4 py-3 text-sm"
-          />
-        </div>
-
-        {/* Description */}
-        <div>
-          <label htmlFor="description" className="block text-xs font-bold uppercase tracking-wider text-text-muted mb-1.5">
-            Mô tả chi tiết công việc
-          </label>
-          <textarea
-            id="description"
-            rows={4}
-            placeholder="Liệt kê chi tiết các yêu cầu, tài liệu bàn giao, thời gian, số lượng người muốn tuyển.."
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            disabled={isSubmitting}
-            className="w-full form-input rounded-xl px-4 py-3 text-sm resize-none"
-          />
-        </div>
-
-        {/* Submit */}
-        <button
-          type="submit"
-          disabled={isSubmitting}
-          className="w-full relative flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 px-4 py-3 text-sm font-bold text-white shadow-md hover:from-blue-500 hover:to-purple-500 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none transition-all duration-150 cursor-pointer"
-        >
-          {isSubmitting ? (
-            <>
-              <div className="h-4 w-4 animate-spin rounded-full border border-t-transparent border-white" />
-              Đang đăng tuyển...
-            </>
-          ) : (
-            `Đăng việc làm (Tiền công: ${price ? Number(price).toLocaleString('vi-VN') : '0'}đ)`
-          )}
-        </button>
-      </form>
-    </div>
-  );
-}
+            <div className
